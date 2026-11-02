@@ -1,0 +1,9 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Reads of environment variables, and the public placeholder key CI builds with"
+regexes = [
+  '''^env\.(N8N_TO_CONVEX_SECRET|CONVEX_TO_N8N_SECRET)$''',
+  '''pk_test_cGxhY2Vob2xkZXIuY2xlcmsuYWNjb3VudHMuZGV2JA''',
+]
