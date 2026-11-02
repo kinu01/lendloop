@@ -1,0 +1,38 @@
+services:
+  n8n:
+    image: n8nio/n8n:2.45.7
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:5678/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    ports:
+      - "127.0.0.1:5678:5678"
+    env_file: n8n/.env
+    environment:
+      GENERIC_TIMEZONE: UTC
+      TZ: UTC
+      EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS: "false"
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      N8N_SECURE_COOKIE: "false"
+      # Code nodes read the signing secrets with $env and sign with Node crypto.
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      NODE_FUNCTION_ALLOW_BUILTIN: crypto
+      # Mock notifications and reminders are printed to the container log.
+      CODE_ENABLE_STDOUT: "true"
+      # Execution history holds payloads with emails, so keep it short.
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: "168"
+      # The local Convex backend runs on this Mac, outside the container.
+      LENDLOOP_CONVEX_SITE_URL: http://host.docker.internal:3211
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n/workflows:/workflows:ro
+
+volumes:
+  n8n_data:

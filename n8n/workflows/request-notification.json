@@ -1,0 +1,180 @@
+{
+  "id": "LLrequestNotify1",
+  "name": "LendLoop: request notification",
+  "active": false,
+  "nodes": [
+    {
+      "id": "f557efa8-d40f-42c9-980c-0e0044c92256",
+      "name": "Webhook from Convex",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lendloop-request",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "webhookId": "e284d44f-be18-4c91-ab99-a6f8cccfa42e"
+    },
+    {
+      "id": "1ef0c599-0813-4ed9-abb6-f8a9d7fde09d",
+      "name": "Verify signature",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst MAX_SKEW_SECONDS = 300;\nconst PATH = '/webhook/lendloop-request';\n\nconst item = $input.first();\nconst headers = item.json.headers || {};\nconst timestamp = headers['x-lendloop-timestamp'];\nconst signature = headers['x-lendloop-signature'];\nlet raw = null;\ntry {\n  raw = (await this.helpers.getBinaryDataBuffer(0, 'data')).toString('utf8');\n} catch {\n  // A multipart request has no raw body, and it must get a 401 like any other bad call.\n}\n\nfunction check() {\n  if (!timestamp || !signature) return 'missing';\n  if (!/^\\d{1,12}$/.test(timestamp)) return 'malformed';\n  const match = /^v1=([0-9a-f]{64})$/.exec(signature);\n  if (!match || raw === null) return 'malformed';\n  if (Math.abs(Math.floor(Date.now() / 1000) - Number(timestamp)) > MAX_SKEW_SECONDS) return 'expired';\n  const expected = crypto\n    .createHmac('sha256', $env.CONVEX_TO_N8N_SECRET)\n    .update(`v1:${timestamp}:POST:${PATH}:${raw}`)\n    .digest();\n  const given = Buffer.from(match[1], 'hex');\n  return crypto.timingSafeEqual(expected, given) ? null : 'mismatch';\n}\n\nconst problem = check();\nif (problem) {\n  console.log(`[signature rejected] reason=${problem}`);\n  return [{ json: { valid: false, reason: problem } }];\n}\nreturn [{ json: { valid: true, payload: JSON.parse(raw) } }];\n"
+      }
+    },
+    {
+      "id": "81883e46-7175-4908-a95b-5f7220bba729",
+      "name": "Signature valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5a1aec9c-bb61-4745-9a0b-aeb0631cdefb",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "92a4a1bb-a230-43fb-a97a-e5896665366a",
+      "name": "Send mock notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        -100
+      ],
+      "parameters": {
+        "jsCode": "function clean(text) {\n  // A value with a line break could forge a log entry.\n  return String(text).replace(/[\\u0000-\\u001f\\u007f]/g, ' ');\n}\n\nfunction mask(email) {\n  const [name, domain] = String(email).split('@');\n  return `${(name || '').slice(0, 1)}***@${domain || ''}`;\n}\n\nconst MESSAGES = {\n  created: (p) => `${p.toolName}: you have a new borrow request for ${p.startDate} to ${p.endDate}.`,\n  approved: (p) => `${p.toolName}: your request for ${p.startDate} to ${p.endDate} was approved. Arrange pickup with ${p.contact.firstName} at ${mask(p.contact.email)}.`,\n  declined: (p) => `${p.toolName}: your request for ${p.startDate} to ${p.endDate} was declined.`,\n  cancelled: (p) => `${p.toolName}: the request for ${p.startDate} to ${p.endDate} was cancelled.`,\n  returned: (p) => `${p.toolName}: the loan is marked as returned. Thank you.`,\n};\n\nconst p = $input.first().json.payload;\nconst text = MESSAGES[p.event]\n  ? MESSAGES[p.event](p)\n  : `${p.toolName}: request status is now ${p.event}.`;\nconsole.log(clean(`[mock notification] event=${p.eventId} to=${mask(p.recipient.email)} message=\"Hi ${p.recipient.firstName}, ${text}\"`));\nreturn [{ json: { eventId: p.eventId, delivered: true } }];\n"
+      }
+    },
+    {
+      "id": "2ed3fca8-2327-4b0a-960f-163e6d7bf6aa",
+      "name": "Respond 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        880,
+        -100
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{ \"ok\": true }",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "bfdd3d51-607b-4ceb-a713-ff593eeee511",
+      "name": "Respond 401",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        660,
+        100
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{ \"error\": \"invalid signature\" }",
+        "options": {
+          "responseCode": 401
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook from Convex": {
+      "main": [
+        [
+          {
+            "node": "Verify signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify signature": {
+      "main": [
+        [
+          {
+            "node": "Signature valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Signature valid?": {
+      "main": [
+        [
+          {
+            "node": "Send mock notification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 401",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send mock notification": {
+      "main": [
+        [
+          {
+            "node": "Respond 200",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "errorWorkflow": "LLautomationErr1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "none"
+  }
+}

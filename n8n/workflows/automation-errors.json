@@ -1,0 +1,103 @@
+{
+  "id": "LLautomationErr1",
+  "name": "LendLoop: automation errors",
+  "active": false,
+  "nodes": [
+    {
+      "id": "2f33a2ac-8c68-4a12-9df4-0c8c9abfef0d",
+      "name": "When a LendLoop workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "8107bc76-c0e6-4fed-baff-5daafb14fcfe",
+      "name": "Log and sign failure report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst path = '/n8n/automation-failures';\nconst data = $input.first().json;\nconst execution = data.execution || {};\nconst workflow = data.workflow || {};\n// Raw error text can quote a payload, so only the node name leaves n8n. The full error stays in its execution history.\nconst node = String(execution.lastNodeExecuted || 'unknown node').slice(0, 100);\nconst message = `The step \"${node}\" failed.`;\n\nconsole.log(`[automation failure] workflow=\"${workflow.name}\" execution=${execution.id} node=\"${execution.lastNodeExecuted}\"`);\n\nconst body = JSON.stringify({\n  workflow: String(workflow.name || 'unknown').slice(0, 100),\n  executionId: String(execution.id || 'unknown').slice(0, 100),\n  message,\n});\nconst timestamp = String(Math.floor(Date.now() / 1000));\nconst signature = crypto\n  .createHmac('sha256', $env.N8N_TO_CONVEX_SECRET)\n  .update(`v1:${timestamp}:POST:${path}:${body}`)\n  .digest('hex');\nreturn [{ json: { url: `${$env.LENDLOOP_CONVEX_SITE_URL}${path}`, body, timestamp, signature: `v1=${signature}` } }];\n"
+      }
+    },
+    {
+      "id": "9fc7c481-7086-4d34-b193-7ecc5b8b32cc",
+      "name": "Report failure to Convex",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-LendLoop-Timestamp",
+              "value": "={{ $json.timestamp }}"
+            },
+            {
+              "name": "X-LendLoop-Signature",
+              "value": "={{ $json.signature }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.body }}",
+        "options": {
+          "timeout": 10000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    }
+  ],
+  "connections": {
+    "When a LendLoop workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Log and sign failure report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log and sign failure report": {
+      "main": [
+        [
+          {
+            "node": "Report failure to Convex",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "none"
+  }
+}
